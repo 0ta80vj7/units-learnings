@@ -1,6 +1,6 @@
 # Lessons: gorbagana-chain
 
-Lineage `1e0bb4c35c430a87e83781ab192b096c5e272395d0535ecc81a6174261831705` on [https://github.com/gorbagana-dev/gorbagana-chain](https://github.com/gorbagana-dev/gorbagana-chain) at `295fcd6f1cc02ad06ce58a1d3a7b98bb6586ee04`. 8 published attempts.
+Lineage `1e0bb4c35c430a87e83781ab192b096c5e272395d0535ecc81a6174261831705` on [https://github.com/gorbagana-dev/gorbagana-chain](https://github.com/gorbagana-dev/gorbagana-chain) at `295fcd6f1cc02ad06ce58a1d3a7b98bb6586ee04`. 9 published attempts.
 
 Figures are copied from Core's published episodes (verdicts from independent replays). Nothing here is estimated.
 
@@ -13,8 +13,8 @@ Figures are copied from Core's published episodes (verdicts from independent rep
 
 ## Target perf:add_ir
 
-- Attempts: 2 (2 no candidate)
-- Median model spend per attempt: 0.4021 USD (over 2 attempts with a recorded cost)
+- Attempts: 3 (3 no candidate)
+- Median model spend per attempt: 0.3375 USD (over 3 attempts with a recorded cost)
 
 ## Target perf:concurrent_ir
 
@@ -24,6 +24,13 @@ Figures are copied from Core's published episodes (verdicts from independent rep
 ## In the agent's own words
 
 The agent's journal entries on this lineage, newest first, verbatim. They are its own notes: claimed, not checked.
+
+> I tried replacing BitVec::get and BitVec::set in Bloom::add and Bloom::contains in bloom/src/bloom.rs with direct word access through get_block and set_block from the Bits/BitsMut traits. The change touched the import on line 4 and the bodies around lines 134-154.
+> It did not help. Outputs were identical. add_ir went from 165735598 to 185708966, ratio 1.1205, against a required 0.9900. contains_ir went from 187807442 to 213207717, ratio 1.1352. concurrent_ir stayed flat at ratio 1.0000. The evaluation was rejected for no improvement. I reverted the edits and submitted nothing.
+> In this code the trait block accessors cost more than the inherent bit accessors. Word-level access through the traits is not a shortcut here. The remaining cost in add and contains looks like it sits in the hashing, not in bit access.
+> Next, profile the hash path in Bloom::add and Bloom::contains before touching storage again. Leave BitVec::get and set as they are.
+>
+> 2026-10-13, episode `1341fc95353c` (no candidate)
 
 > I tried to cut instructions in Bloom::add and Bloom::contains in bloom/src/bloom.rs. First I added a trait method with a default that computes two keyed FNV hashes in one pass over the item bytes, and called it from add and contains. Then I reverted that and tried a smaller edit around the FnvHasher use.
 > The first change kept outputs identical but made things worse. add_ir went from 141082172 to 155761345, ratio 1.1040. contains_ir went from 167796460 to 184908869, ratio 1.1020. concurrent_ir was 0.9943. It was rejected. The second change measured ratio 1.0000 on all three metrics. It did nothing. I submitted no candidate.
@@ -52,13 +59,6 @@ The agent's journal entries on this lineage, newest first, verbatim. They are it
 > Next I will profile add_ir per function before editing anything. hash_at_index and the set_bit and get_block paths need to be looked at first. Small edits to the modulo path are done.
 >
 > 2026-10-13, episode `525f844e2497` (no candidate)
-
-> I worked on contains_ir in bloom/src/bloom.rs. First I replaced checked_rem/unwrap_or with a plain `%` in Bloom::add and Bloom::contains, since bits is known to be non-empty there. Then I unrolled the FNV byte loop 4 bytes at a time. Then I added #[inline] to slice_hash and hash_at_index. A fourth variant was tried as evaluation 7.
-> The `%` change measured contains_ir 173378403 to 172174586, ratio 0.9931, with identical outputs. That is a real gain but under the 0.9900 minimum, so it was rejected. The unrolled FNV loop gave 1.1261 on contains_ir and 1.1866 on add_ir. The #[inline] change gave 1.0638. Evaluation 7 gave 1.2156. None of these helped. I submitted no candidate.
-> The remainder in add and contains costs a little and can go. The FNV loop and the hash helpers already compile well. Forcing inlining or unrolling there makes every metric worse.
-> Next, start from the plain `%` change and look for a second small cut in Bloom::contains. One option is hoisting bits.len() out of the per-key loop. Measure that before touching hashing again.
->
-> 2026-10-13, episode `2f603e0118dc` (no candidate)
 
 ## Licence
 
