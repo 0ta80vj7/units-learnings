@@ -1,13 +1,15 @@
 # Lessons: gorbagana-chain
 
-Lineage `1e0bb4c35c430a87e83781ab192b096c5e272395d0535ecc81a6174261831705` on [https://github.com/gorbagana-dev/gorbagana-chain](https://github.com/gorbagana-dev/gorbagana-chain) at `295fcd6f1cc02ad06ce58a1d3a7b98bb6586ee04`. 6 published attempts.
+Lineage `1e0bb4c35c430a87e83781ab192b096c5e272395d0535ecc81a6174261831705` on [https://github.com/gorbagana-dev/gorbagana-chain](https://github.com/gorbagana-dev/gorbagana-chain) at `295fcd6f1cc02ad06ce58a1d3a7b98bb6586ee04`. 8 published attempts.
 
 Figures are copied from Core's published episodes (verdicts from independent replays). Nothing here is estimated.
 
 ## Target perf:contains_ir
 
-- Attempts: 2 (2 no candidate)
-- Median model spend per attempt: 0.4800 USD (over 2 attempts with a recorded cost)
+- Attempts: 4 (3 no candidate, 1 accepted)
+- Best accepted effect: 1.75% (ratio 0.9825), episode `051ea6607b8c`
+- Files changed by accepted candidates: `bloom/src/bloom.rs`
+- Median model spend per attempt: 0.4893 USD (over 4 attempts with a recorded cost)
 
 ## Target perf:add_ir
 
@@ -22,6 +24,20 @@ Figures are copied from Core's published episodes (verdicts from independent rep
 ## In the agent's own words
 
 The agent's journal entries on this lineage, newest first, verbatim. They are its own notes: claimed, not checked.
+
+> I tried to cut instructions in Bloom::add and Bloom::contains in bloom/src/bloom.rs. First I added a trait method with a default that computes two keyed FNV hashes in one pass over the item bytes, and called it from add and contains. Then I reverted that and tried a smaller edit around the FnvHasher use.
+> The first change kept outputs identical but made things worse. add_ir went from 141082172 to 155761345, ratio 1.1040. contains_ir went from 167796460 to 184908869, ratio 1.1020. concurrent_ir was 0.9943. It was rejected. The second change measured ratio 1.0000 on all three metrics. It did nothing. I submitted no candidate.
+> Hashing two keys in one pass does not help here. The per-pass bookkeeping costs more than the extra walks over the bytes it saves. The current FnvHasher path is not where the instructions go.
+> Next, profile contains_ir by line before editing. Look at the bit index math and get_bit in contains, not the hasher.
+>
+> 2026-10-13, episode `9dd91879574c` (no candidate)
+
+> I worked in bloom/src/bloom.rs. I rewrote slice_hash to compute keyed FNV-1a over whole 8-byte chunks in an unrolled loop and pass only the tail to FnvHasher. The hash values match FnvHasher::with_key(k).write(slice). In Bloom::add and Bloom::contains I read bits.len() once per call and replaced checked_rem().unwrap_or(0) with a plain `%`. Both functions already return early when bits is empty. I removed a private helper that was no longer used.
+> Evaluation 1, at 16 lines, was rejected. contains_ir went from 166539701 to 166084913, ratio 0.9973 against a required 0.9900. Evaluation 3, at 27 lines, was accepted. contains_ir went from 166539701 to 163957069, ratio 0.9845. add_ir was at 0.9907 and concurrent_ir at 0.9909. Outputs were identical. I submitted it and it is queued for replay.
+> Per-key overhead in contains is small. The hash loop is where the instructions are. The `%` change alone did not clear the bar.
+> Next I will look at hash_at_index and at the bit lookup path in contains, to see whether the double hashing can share more work.
+>
+> 2026-10-13, episode `051ea6607b8c` (accepted)
 
 > I read bloom/src/bloom.rs and the bench in bloom/examples/lineage_bench.rs. I searched for the concurrent paths and for the BitVec conversion, truncate and into_boxed_slice functions, looking for overhead outside hashing. I made no edits and ran no sandbox evaluations.
 > Nothing was measured this session. Most of the instruction count in the concurrent benchmark is FNV hashing, done once per key per item. The big filter uses 27 keys over 64-byte items. The 24 small filters use 3 to 5 keys over 32-byte items. The FnvHasher byte loop looks close to its floor of three instructions per byte. Earlier measured attempts made every metric worse. I submitted no candidate.
@@ -43,20 +59,6 @@ The agent's journal entries on this lineage, newest first, verbatim. They are it
 > Next, start from the plain `%` change and look for a second small cut in Bloom::contains. One option is hoisting bits.len() out of the per-key loop. Measure that before touching hashing again.
 >
 > 2026-10-13, episode `2f603e0118dc` (no candidate)
-
-> Target was concurrent_ir in bloom/src/bloom.rs. I tried three changes. First, hashing four keys per pass over the item bytes in ConcurrentBloom::add and Bloom::add. Second, the same with two scalar lanes. Third, loading the word before the atomic fetch_or, so the read-modify-write is skipped when the bit is already set.
-> All three builds passed with identical outputs. All three were rejected. The four-key pass gave concurrent_ir 1.0359, add_ir 1.0647 and contains_ir 1.0088. Two lanes gave concurrent_ir 1.0855 and add_ir 1.0848. The load-before-fetch_or change left add_ir and contains_ir at 1.0000, but concurrent_ir rose to 1.0162. None of them helped. I submitted nothing.
-> The per-key hashing loop is not where the cost is that batching can remove. Fusing it added instructions. The extra load costs more than the skipped atomics save on this bench.
-> Next, read lineage_bench.rs for the bit-set hit rate before touching the atomics again. Then look at index computation instead of hashing.
->
-> 2026-10-13, episode `d3cf018d058b` (no candidate)
-
-> Target was add_ir in bloom/src/bloom.rs. First I replaced bv get/set with get_block/set_block in Bloom::add and Bloom::contains. Then I tried a provided trait method, hash_at_indexes, to share the index computation between add and contains.
-> Evaluation 1, the block access change: add_ir went from 140123731 to 155522234, ratio 1.1099. contains_ir ratio was 1.1250. Outputs were identical. It was rejected. Evaluation 3 did not build, and the stable tests failed, test_add_contains among them. Evaluation 5, the trait method: add_ir ratio was 1.0389, contains_ir 1.0045, concurrent_ir 0.9940. Outputs were identical. It was rejected. Neither change helped. I submitted nothing.
-> In bv, block access through the Bits trait costs more than plain get/set. The index loop in Bloom::add is already tight. Adding indirection around it adds instructions.
-> Next I would profile where add_ir is actually spent before editing again. The hashing may cost more than the bit writes. I would also check how much of add_ir comes from bench setup in lineage_bench.rs.
->
-> 2026-10-13, episode `1327267a4097` (no candidate)
 
 ## Licence
 
